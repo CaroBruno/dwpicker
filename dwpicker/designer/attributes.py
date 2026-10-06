@@ -235,6 +235,11 @@ class ShapeSettings(QtWidgets.QWidget):
         method = partial(self.optionSet.emit, 'background')
         self.background.valueSet.connect(method)
 
+        self.background_locked = BoolCombo(False)
+        method = partial(self.optionSet.emit, 'background.locked')
+        self.background_locked.valueSet.connect(method)
+        self.background_locked_label = QtWidgets.QLabel('Lock position')
+
         self.ignored_by_focus = BoolCombo()
         method = partial(self.optionSet.emit, 'shape.ignored_by_focus')
         self.ignored_by_focus.valueSet.connect(method)
@@ -277,6 +282,7 @@ class ShapeSettings(QtWidgets.QWidget):
         layout1.addRow('Panel number', self.panel)
         layout1.addRow('Visibility layer', self.layer)
         layout1.addRow('Background', self.background)
+        layout1.addRow(self.background_locked_label, self.background_locked)
         layout1.addRow('Ignored by focus', self.ignored_by_focus)
         layout1.addRow('Shape', self.shape)
 
@@ -338,6 +344,17 @@ class ShapeSettings(QtWidgets.QWidget):
         values = list({option['background'] for option in options})
         value = str(values[0]) if len(values) == 1 else None
         self.background.setCurrentText(value)
+
+        background_selection = bool(options) and all(
+            option.get('background', False) for option in options)
+        lock_values = {
+            option.get('background.locked', False) for option in options}
+        self.background_locked.setVisible(background_selection)
+        self.background_locked_label.setVisible(background_selection)
+        self.background_locked.blockSignals(True)
+        self.background_locked.setCurrentText(
+            str(next(iter(lock_values))) if len(lock_values) == 1 else '')
+        self.background_locked.blockSignals(False)
 
         values = list({option['shape.ignored_by_focus'] for option in options})
         value = str(values[0]) if len(values) == 1 else None
@@ -680,11 +697,10 @@ class ActionSettings(QtWidgets.QWidget):
         self.layout.addItem(QtWidgets.QSpacerItem(0, 8))
 
     def targets(self):
-        targets = str(self._targets.text())
-        try:
-            return [t.strip(" ") for t in targets.split(',')]
-        except ValueError:
+        targets = str(self._targets.text()).strip()
+        if not targets:
             return []
+        return [t.strip(" ") for t in targets.split(',')]
 
     def call_clear_targets(self):
         self._targets.setText('')
@@ -718,7 +734,8 @@ class ActionSettings(QtWidgets.QWidget):
         self.targets_changed()
 
     def targets_changed(self):
-        values = [t.strip(" ") for t in self._targets.text().split(",")]
+        targets = str(self._targets.text()).strip()
+        values = [t.strip(" ") for t in targets.split(",")] if targets else []
         self.optionSet.emit('action.targets', values)
 
     def set_options(self, options):

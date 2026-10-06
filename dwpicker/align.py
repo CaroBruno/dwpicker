@@ -66,33 +66,35 @@ def align_bottom(shapes):
 def arrange_horizontal(shapes):
     if len(shapes) < 3:
         return
-    shapes = sorted(shapes, key=lambda s: s.bounding_rect().center().x())
-    centers = split_line(
-        point1=shapes[0].bounding_rect().center(),
-        point2=shapes[-1].bounding_rect().center(),
-        step_number=len(shapes))
-    for shape, center in zip(shapes, centers):
-        offset = shape.bounding_rect().center().x() - shape.rect.center().x()
-        point = QtCore.QPointF(center.x() - offset, shape.rect.center().y())
-        shape.rect.moveCenter(point)
+    shapes = sorted(shapes, key=lambda s: s.bounding_rect().left())
+    bounds = [shape.bounding_rect() for shape in shapes]
+    total_width = sum(rect.width() for rect in bounds)
+    gap = (
+        bounds[-1].right() - bounds[0].left() - total_width
+    ) / (len(shapes) - 1)
+    position = bounds[0].left()
+    for shape, rect in zip(shapes, bounds):
+        shape.rect.translate(position - rect.left(), 0)
         shape.synchronize_rect()
         shape.update_path()
+        position += rect.width() + gap
 
 
 def arrange_vertical(shapes):
     if len(shapes) < 3:
         return
-    shapes = sorted(shapes, key=lambda s: s.bounding_rect().center().y())
-    centers = split_line(
-        point1=shapes[0].bounding_rect().center(),
-        point2=shapes[-1].bounding_rect().center(),
-        step_number=len(shapes))
-    for shape, center in zip(shapes, centers):
-        offset = shape.bounding_rect().center().y() - shape.rect.center().y()
-        point = QtCore.QPointF(shape.rect.center().x(), center.y() - offset)
-        shape.rect.moveCenter(point)
+    shapes = sorted(shapes, key=lambda s: s.bounding_rect().top())
+    bounds = [shape.bounding_rect() for shape in shapes]
+    total_height = sum(rect.height() for rect in bounds)
+    gap = (
+        bounds[-1].bottom() - bounds[0].top() - total_height
+    ) / (len(shapes) - 1)
+    position = bounds[0].top()
+    for shape, rect in zip(shapes, bounds):
+        shape.rect.translate(0, position - rect.top())
         shape.synchronize_rect()
         shape.update_path()
+        position += rect.height() + gap
 
 
 def align_shapes_on_line(shapes, point1, point2):

@@ -19,6 +19,7 @@ class MenuWidget(QtWidgets.QWidget):
     copyRequested = QtCore.Signal()
     copySettingsRequested = QtCore.Signal()
     deleteRequested = QtCore.Signal()
+    duplicateMirrorRequested = QtCore.Signal()
     editCenterToggled = QtCore.Signal(bool)
     lockBackgroundShapeToggled = QtCore.Signal(bool)
     moveDownRequested = QtCore.Signal()
@@ -145,6 +146,13 @@ class MenuWidget(QtWidgets.QWidget):
         self.vsymmetry.setToolTip('Mirror a shape vertically')
         method = partial(self.symmetryRequested.emit, False)
         self.vsymmetry.triggered.connect(method)
+        self.duplicate_mirror = QtWidgets.QAction(
+            icon('h_symmetry.png'), '', self)
+        self.duplicate_mirror.setToolTip(
+            'Duplicate selected buttons across the mirror axis, '
+            'mirroring their layout and swapping L/R labels and targets')
+        self.duplicate_mirror.triggered.connect(
+            self.duplicateMirrorRequested.emit)
 
         method = partial(self.alignRequested.emit, 'left')
         self.align_left = QtWidgets.QAction(icon('align_left.png'), '', self)
@@ -214,6 +222,7 @@ class MenuWidget(QtWidgets.QWidget):
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.hsymmetry)
         self.toolbar.addAction(self.vsymmetry)
+        self.toolbar.addAction(self.duplicate_mirror)
         self.toolbar.addSeparator()
         self.toolbar.addAction(self.onbottom)
         self.toolbar.addAction(self.movedown)

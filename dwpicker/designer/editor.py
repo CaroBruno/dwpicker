@@ -1,5 +1,6 @@
 from functools import partial
 from copy import deepcopy
+import re
 
 from dwpicker.pyside import QtWidgets, QtCore, QtGui
 from maya import cmds
@@ -86,6 +87,8 @@ class PickerEditor(QtWidgets.QWidget):
         method = self.set_selection_on_bottom
         self.menu.onBottomRequested.connect(method)
         self.menu.symmetryRequested.connect(self.do_symmetry)
+        self.menu.duplicateMirrorRequested.connect(
+            self.duplicate_selection_mirrored)
         self.menu.searchAndReplaceRequested.connect(self.search_and_replace)
         self.menu.alignRequested.connect(self.align_selection)
         self.menu.arrangeRequested.connect(self.arrange_selection)
@@ -254,6 +257,8 @@ class PickerEditor(QtWidgets.QWidget):
             self.selection_changed()
         if update_geometries:
             self.update_manipulator_rect()
+        if option == 'background.locked':
+            self.shape_canvas.update_selection(changed=False)
 
         if option == 'visibility_layer':
             self.layers_modified()
@@ -370,12 +375,15 @@ class PickerEditor(QtWidgets.QWidget):
         self.set_selection_move_on_stack(move_elements_to_array_begin, False)
 
     def update_manipulator_rect(self):
-        rect = get_shapes_bounding_rects(self.shape_canvas.selection)
+        rect = get_shapes_bounding_rects(
+            self.shape_canvas.editable_selection())
         self.shape_canvas.manipulator.set_rect(rect)
         self.shape_canvas.update()
 
     def do_symmetry(self, horizontal=True):
-        shapes = self.shape_canvas.selection.shapes
+        shapes = self.shape_canvas.editable_selection()
+        if not shapes:
+            return
         for shape in shapes:
             if shape.options['shape'] == 'custom':
                 path_symmetry(
@@ -402,6 +410,95 @@ class PickerEditor(QtWidgets.QWidget):
             self.document.record_undo()
         self.attribute_editor.update()
         self.update_manipulator_rect()
+
+    @staticmethod
+    def replace_side_marker(value, left_marker, right_marker):
+        if len(left_marker) == 1 and left_marker.isalnum():
+            pattern = r'(?<![A-Za-z0-9]){}(?![A-Za-z0-9])'.format(
+                re.escape(left_marker))
+            return re.sub(pattern, right_marker, value)
+        return value.replace(left_marker, right_marker)
+
+    @staticmethod
+    def swap_red_blue_channels(value):
+        color = QtGui.QColor(value)
+        if not color.isValid():
+            return value
+        red, green, blue, alpha = color.getRgb()
+        if alpha < 255:
+            return '#{:02X}{:02X}{:02X}{:02X}'.format(
+                alpha, blue, green, red)
+        return '#{:02X}{:02X}{:02X}'.format(blue, green, red)
+
+    def duplicate_selection_mirrored(self):
+        shapes = self.shape_canvas.editable_selection()
+        if not shapes:
+            return
+
+        left_marker, accepted = QtWidgets.QInputDialog.getText(
+            self, 'Duplicate mirrored shapes', 'Left-side marker:',
+            text='L')
+        if not accepted or not left_marker:
+            return
+
+        right_marker, accepted = QtWidgets.QInputDialog.getText(
+            self, 'Duplicate mirrored shapes', 'Right-side marker:',
+            text='R')
+        if not accepted or not right_marker:
+            return
+
+        mirror_axis_x, accepted = QtWidgets.QInputDialog.getDouble(
+            self, 'Duplicate mirrored shapes', 'Mirror axis X:',
+            0.0, -1000000.0, 1000000.0, 3)
+        if not accepted:
+            return
+
+        mirror_axis = QtCore.QPointF(mirror_axis_x, 0)
+        clones_data = []
+        source_ids = []
+        source_children = []
+        for shape in shapes:
+            options = deepcopy(shape.options)
+            source_ids.append(options['id'])
+            source_children.append(options.get('children', [])[:])
+            options['text.content'] = self.replace_side_marker(
+                options['text.content'], left_marker, right_marker)
+            options['action.targets'] = [
+                self.replace_side_marker(target, left_marker, right_marker)
+                for target in options['action.targets']]
+            for key in (
+                    'bgcolor.normal', 'bgcolor.hovered', 'bgcolor.clicked',
+                    'bordercolor.normal', 'bordercolor.hovered',
+                    'bordercolor.clicked'):
+                options[key] = self.swap_red_blue_channels(options[key])
+
+            rect = QtCore.QRectF(
+                options['shape.left'], options['shape.top'],
+                options['shape.width'], options['shape.height'])
+            if options['shape'] == 'custom':
+                path_symmetry(options['shape.path'], horizontal=True)
+                rect_top_left_symmetry(
+                    rect, mirror_axis, horizontal=True)
+            else:
+                rect_symmetry(rect, mirror_axis, horizontal=True)
+            options['shape.left'] = rect.left()
+            options['shape.top'] = rect.top()
+            clones_data.append(options)
+
+        clones = self.document.add_shapes(clones_data)
+        clone_ids = {
+            source_id: clone.options['id']
+            for source_id, clone in zip(source_ids, clones)}
+        for children, clone in zip(source_children, clones):
+            clone.options['children'] = [
+                clone_ids[child] for child in children
+                if child in clone_ids]
+
+        self.document.record_undo()
+        self.document.shapes_changed.emit()
+        self.shape_canvas.selection.replace(clones)
+        self.shape_canvas.update_selection()
+        self.shape_canvas.update()
 
     def search_and_replace(self):
         dialog = SearchAndReplaceDialog()
@@ -433,21 +530,23 @@ class PickerEditor(QtWidgets.QWidget):
                     result = command['command'].replace(pattern, replace)
                     command['command'] = result
 
-        self.document.shape_changed.emit()
+        self.document.shapes_changed.emit()
         self.document.record_undo()
         self.shape_canvas.update()
         return True
 
     def move_selection(self, direction):
+        shapes = self.shape_canvas.editable_selection()
+        if not shapes:
+            return
         offset = DIRECTION_OFFSETS[direction]
         rect = self.shape_canvas.manipulator.rect
         reference_rect = QtCore.QRectF(rect)
 
         self.shape_canvas.transform.set_rect(rect)
         self.shape_canvas.transform.reference_rect = reference_rect
-        self.shape_canvas.transform.shift(
-            self.shape_canvas.selection.shapes, offset)
-        for shape in self.shape_canvas.selection:
+        self.shape_canvas.transform.shift(shapes, offset)
+        for shape in shapes:
             shape.synchronize_rect()
             shape.update_path()
         self.shape_canvas.update()
@@ -456,10 +555,11 @@ class PickerEditor(QtWidgets.QWidget):
         self.document.shapes_changed.emit()
 
     def align_selection(self, direction):
-        if not self.shape_canvas.selection:
+        shapes = self.shape_canvas.editable_selection()
+        if not shapes:
             return
-        align_shapes(self.shape_canvas.selection, direction)
-        rect = get_shapes_bounding_rects(self.shape_canvas.selection)
+        align_shapes(shapes, direction)
+        rect = get_shapes_bounding_rects(shapes)
         self.shape_canvas.manipulator.set_rect(rect)
         self.shape_canvas.update()
         self.selection_changed()
@@ -467,13 +567,14 @@ class PickerEditor(QtWidgets.QWidget):
         self.document.shapes_changed.emit()
 
     def arrange_selection(self, direction):
-        if not self.shape_canvas.selection:
+        shapes = self.shape_canvas.editable_selection()
+        if not shapes:
             return
         if direction == 'horizontal':
-            arrange_horizontal(self.shape_canvas.selection)
+            arrange_horizontal(shapes)
         else:
-            arrange_vertical(self.shape_canvas.selection)
-        rect = get_shapes_bounding_rects(self.shape_canvas.selection)
+            arrange_vertical(shapes)
+        rect = get_shapes_bounding_rects(shapes)
         self.shape_canvas.manipulator.set_rect(rect)
         self.shape_canvas.update()
         self.selection_changed()

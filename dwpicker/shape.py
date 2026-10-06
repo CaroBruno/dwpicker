@@ -108,6 +108,8 @@ class Shape():
         # creation.
         if 'children' not in options:
             options['children'] = []
+        if options.get('background', False):
+            options.setdefault('background.locked', False)
 
         self.hovered = False
         self.clicked = False
@@ -193,7 +195,9 @@ class Shape():
         select_targets([self], selection_mode=selection_mode)
 
     def targets(self):
-        return self.options['action.targets']
+        return [
+            target for target in self.options['action.targets']
+            if target and target.strip()]
 
     def set_targets(self, targets):
         self.options['action.targets'] = targets

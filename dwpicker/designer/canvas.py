@@ -56,6 +56,7 @@ class ShapeEditCanvas(QtWidgets.QWidget):
 
         self.parenting_shapes = None
         self.clicked_shape = None
+        self.locked_background_press = None
         self.increase_undo_on_release = False
         self.lock_background_shape = True
 
@@ -105,6 +106,12 @@ class ShapeEditCanvas(QtWidgets.QWidget):
             if cursor_in_shape(shape, cursor):
                 return shape
 
+    def editable_selection(self):
+        return [
+            shape for shape in self.selection
+            if not shape.is_background() or
+            not shape.options.get('background.locked', False)]
+
     def list_shapes(self, skip_background=False):
         if self.lock_background_shape or skip_background:
             return [
@@ -138,6 +145,11 @@ class ShapeEditCanvas(QtWidgets.QWidget):
         cursor = self.viewportmapper.to_units_coords(get_cursor(self))
         hovered_shape = self.get_hovered_shape(cursor)
         self.transform.direction = self.manipulator.get_direction(event.pos())
+        locked_background = bool(
+            hovered_shape and hovered_shape.is_background() and
+            hovered_shape.options.get('background.locked', False) and
+            not self.lock_background_shape and
+            not self.transform.direction)
         parenting = (
             self.interaction_manager.alt_pressed and not
             self.interaction_manager.ctrl_pressed and not
@@ -163,7 +175,14 @@ class ShapeEditCanvas(QtWidgets.QWidget):
             self.update()
             return
 
+        if locked_background:
+            self.selection.set([hovered_shape])
+            self.update_selection()
+            self.selection_square.clicked(cursor)
+            self.locked_background_press = event.pos()
+
         conditions = (
+            not locked_background and
             hovered_shape and
             hovered_shape not in self.selection and
             not self.transform.direction)
@@ -187,7 +206,9 @@ class ShapeEditCanvas(QtWidgets.QWidget):
             event,
             pressed=True,
             has_shape_hovered=bool(hovered_shape),
-            dragging=bool(hovered_shape) or self.transform.direction)
+            dragging=(
+                (bool(hovered_shape) and not locked_background) or
+                self.transform.direction))
 
     def resizeEvent(self, event):
         self.viewportmapper.viewsize = self.size()
@@ -214,17 +235,19 @@ class ShapeEditCanvas(QtWidgets.QWidget):
                 self.increase_undo_on_release = True
                 return self.update()
 
-            rect = self.manipulator.rect
-            if self.transform.direction:
-                self.transform.resize(self.selection.shapes, cursor)
-            elif rect is not None:
-                self.transform.move(shapes=self.selection, cursor=cursor)
-            for shape in self.selection:
-                shape.synchronize_rect()
-                shape.update_path()
-                shape.synchronize_image()
-            self.increase_undo_on_release = True
-            self.selectedShapesChanged.emit()
+            selection = self.editable_selection()
+            if selection:
+                rect = self.manipulator.rect
+                if self.transform.direction:
+                    self.transform.resize(selection, cursor)
+                elif rect is not None:
+                    self.transform.move(shapes=selection, cursor=cursor)
+                for shape in selection:
+                    shape.synchronize_rect()
+                    shape.update_path()
+                    shape.synchronize_image()
+                self.increase_undo_on_release = True
+                self.selectedShapesChanged.emit()
 
         elif self.interaction_manager.mode == InteractionManager.SELECTION:
             self.selection_square.handle(cursor)
@@ -266,13 +289,20 @@ class ShapeEditCanvas(QtWidgets.QWidget):
             self.increase_undo_on_release = False
 
         if self.interaction_manager.mode == InteractionManager.SELECTION:
-            self.select_shapes()
+            start = self.locked_background_press
+            moved = (
+                start is not None and
+                (event.pos() - start).manhattanLength() >
+                QtWidgets.QApplication.startDragDistance())
+            if start is None or moved:
+                self.select_shapes()
 
         elif self.interaction_manager.mode == InteractionManager.DRAGGING:
             self.update_selection(False)
 
         self.interaction_manager.update(event, pressed=False)
         self.selection_square.release()
+        self.locked_background_press = None
         self.update()
 
     def parent_shapes(self):
@@ -316,7 +346,9 @@ class ShapeEditCanvas(QtWidgets.QWidget):
     def select_shapes(self):
         shapes = [
             s for s in self.list_shapes()
-            if self.selection_square.intersects(s)]
+            if self.selection_square.intersects(s) and not (
+                s.is_background() and
+                s.options.get('background.locked', False))]
         if shapes:
             self.selection.set(shapes)
             self.update_selection()
@@ -342,7 +374,8 @@ class ShapeEditCanvas(QtWidgets.QWidget):
         self.update()
 
     def update_selection(self, changed=True):
-        shapes = [s for s in self.selection if s in self.visible_shapes()]
+        editable_selection = self.editable_selection()
+        shapes = [s for s in editable_selection if s in self.visible_shapes()]
         if shapes:
             rect = get_shapes_bounding_rects(shapes)
         else:
