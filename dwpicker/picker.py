@@ -292,7 +292,7 @@ class PickerPanelView(QtWidgets.QWidget):
     def unregister_callbacks(self):
         for callback in self.callbacks:
             om.MMessage.removeCallback(callback)
-            self.callbacks.remove(callback)
+        self.callbacks = []
 
     def sync_with_maya_selection(self, *_):
         if not cmds.optionVar(query=SYNCHRONYZE_SELECTION):

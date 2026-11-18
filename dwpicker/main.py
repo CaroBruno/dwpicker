@@ -399,7 +399,7 @@ class DwPicker(DockableBase, QtWidgets.QWidget):
     def unregister_callbacks(self):
         for cb in self.callbacks:
             om.MMessage.removeCallback(cb)
-            self.callbacks.remove(cb)
+        self.callbacks = []
         for picker in self.pickers:
             picker.unregister_callbacks()
 
