@@ -195,6 +195,7 @@ class ShapeEditCanvas(QtWidgets.QWidget):
             self.selection.set([])
             self.update_selection()
             self.selection_square.clicked(cursor)
+            self.warn_if_background_globally_locked(cursor, event.pos())
 
         if self.manipulator.rect is not None:
             self.transform.set_rect(self.manipulator.rect)
@@ -209,6 +210,25 @@ class ShapeEditCanvas(QtWidgets.QWidget):
             dragging=(
                 (bool(hovered_shape) and not locked_background) or
                 self.transform.direction))
+
+    def warn_if_background_globally_locked(self, cursor, pos):
+        """
+        Background shapes are unclickable while the global "Lock background
+        items" toolbar button is on. Tell the user when they click on one,
+        otherwise the click silently does nothing.
+        """
+        if not self.lock_background_shape:
+            return
+        clicked_background = any(
+            shape.is_background() and cursor_in_shape(shape, cursor)
+            for shape in self.visible_shapes())
+        if not clicked_background:
+            return
+        QtWidgets.QToolTip.showText(
+            self.mapToGlobal(pos),
+            'Background items are locked.\n'
+            'Disable "Lock background items" in the toolbar to select them.',
+            self)
 
     def resizeEvent(self, event):
         self.viewportmapper.viewsize = self.size()

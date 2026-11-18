@@ -234,6 +234,10 @@ class PickerEditor(QtWidgets.QWidget):
         rect_options = (
             'shape.top', 'shape.width', 'shape.height', 'shape.left')
 
+        if option == 'background':
+            # Refresh attribute editor to show/hide "Lock position".
+            update_selection = True
+
         for shape in self.shape_canvas.selection:
             shape.options[option] = value
             if option in ('shape.path', 'shape'):
